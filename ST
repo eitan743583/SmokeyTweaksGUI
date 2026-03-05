@@ -1000,44 +1000,59 @@ function Enable-Updates {
     Pause
 }
 
-# --- פונקציית מיתוג וביטול שירותי אבטחה (SmokeyOS Extreme) ---
+# --- פונקציית מיתוג וביטול שירותי אבטחה (SmokeyTweaksDisDef) ---
 function Disable-Defender {
     Clear-Host
-    Write-Host "================================================" -ForegroundColor Cyan
-    Write-Host "   Disable SECURITY & MICROSOFT DEFENDER    " -ForegroundColor White -BackgroundColor Red
-    Write-Host "================================================" -ForegroundColor Cyan
+    Write-Host "--- SMOKEY TWEAKS: KILLING ALL SECURITY SYSTEMS ---" -ForegroundColor Red -BackgroundColor Black
+    Write-Host "Please make sure 'Tamper Protection' is OFF in Windows Settings!" -ForegroundColor Yellow
 
-    # 1. שינוי שם המערכת ל-SmokeyOS בכל הרישומים
-    Write-Host "[*] Branded as SmokeyOS..." -ForegroundColor Magenta
-    $BrandPaths = @(
-        "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"
+    # 1. ביטול Defender דרך MpPreference (הגדרות פנימיות)
+    Write-Host "[*] Disabling Defender Real-Time Protection..." -ForegroundColor Cyan
+    Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+    Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+    Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction SilentlyContinue
+    Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
+    Set-MpPreference -DisablePrivacyMode $true -ErrorAction SilentlyContinue
+    Set-MpPreference -DisableIntrusionPreventionSystem $true -ErrorAction SilentlyContinue
+    Set-MpPreference -DisableScriptScanning $true -ErrorAction SilentlyContinue
+    Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction SilentlyContinue
+    Set-MpPreference -MAPSReporting 0 -ErrorAction SilentlyContinue
+
+    # 2. ביטול SmartScreen (קבצים, דפדפן ואפליקציות)
+    Write-Host "[*] Disabling SmartScreen..." -ForegroundColor Cyan
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -Value "Off" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AppHost" -Name "EnableWebContentEvaluation" -Value 0 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "EnableSmartScreen" -Value 0 -ErrorAction SilentlyContinue
+
+    # 3. ביטול Firewall (חומת האש)
+    Write-Host "[*] Disabling Windows Firewall (All Profiles)..." -ForegroundColor Cyan
+    Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False -ErrorAction SilentlyContinue
+
+    # 4. הרצת שינויי Registry כבדים (Policies)
+    Write-Host "[*] Applying Registry Security Kills..." -ForegroundColor Cyan
+    $Paths = @(
+        "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender",
+        "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
     )
-    foreach ($path in $BrandPaths) {
-        if (!(Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+    foreach ($Path in $Paths) {
+        if (!(Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
     }
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "ProductName" -Value "SmokeyOS" -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" -Name "Manufacturer" -Value "SmokeyOS" -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" -Name "Model" -Value "Optimized Gaming OS" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiSpyware" -Value 1 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" -Name "DisableRealtimeMonitoring" -Value 1 -ErrorAction SilentlyContinue
 
-    # 2. עצירה וביטול שירותים (העצירה ב-Services + נעילה ב-Registry)
-    Write-Host "[*] Terminating Security Services..." -ForegroundColor Yellow
-    $servicesToKill = @("WdNisSvc", "WinDefend", "MDCoreSvc", "Sense", "mpssvc", "whesvc", "wscsvc")
-
-    foreach ($svc in $servicesToKill) {
-        # ניסיון לעצור את השירות כאן ועכשיו
-        if ((Get-Service -Name $svc -ErrorAction SilentlyContinue).Status -eq 'Running') {
-            Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
-            Write-Host "[!] Service $svc Stopped." -ForegroundColor Magenta
-        }
-        
-        # נעילה ב-Registry (Start=4 אומר Disabled)
-        $svcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$svc"
-        if (Test-Path $svcPath) {
-            Set-ItemProperty -Path $svcPath -Name "Start" -Value 4 -ErrorAction SilentlyContinue
-            Write-Host "[+] $svc -> DISABLED in Registry" -ForegroundColor Green
-        }
+    # 5. ניסיון לעצור את ה-Services (דורש הרשאות מנהל גבוהות)
+    Write-Host "[*] Killing Security Services..." -ForegroundColor Cyan
+    $Services = @("WinDefend", "WdNisSvc", "Sense", "wscsvc", "SgrmBroker", "SgrmLhc", "mpssvc")
+    foreach ($Svc in $Services) {
+        Stop-Service -Name $Svc -Force -ErrorAction SilentlyContinue
+        Set-Service -Name $Svc -StartupType Disabled -ErrorAction SilentlyContinue
     }
+
+    Write-Host ""
+    Write-Host "DONE! All security systems have been targeted." -ForegroundColor Green
+    Write-Host "Press any key to return to menu..." -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
 
     # 3. ביטול הגדרות Defender (Preferences)
     if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
@@ -1276,4 +1291,5 @@ try {
     Log-Error $_
     Write-Host "`n[!] Script crashed. See $LogFile for details." -ForegroundColor Red
     Pause
+
 }
