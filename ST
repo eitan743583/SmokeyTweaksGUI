@@ -140,6 +140,63 @@ function Show-GUI {
         Pause
     }
 
+function Smokey-Custom-Optimize {
+    Clear-Host
+    Write-Host "--- SMOKEY TWEAKS: FULL Optimize & Debloat ---" -ForegroundColor Red -BackgroundColor Black
+
+    # 1. ביטול בידוד ליבה (Core Isolation) ו-VBS - הכי חשוב ל-FPS
+    Write-Host "[+] Killing Core Isolation & VBS..." -ForegroundColor Cyan
+    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -Value 0 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LsaCfgFlags" -Value 0 -ErrorAction SilentlyContinue
+
+    # 2. הסרת כל ה-Microsoft Apps (Debloat מוחלט)
+    Write-Host "[!] Purging all Microsoft Apps (All Users & Provisioned)..." -ForegroundColor Magenta
+    Get-AppxPackage -AllUsers | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Get-AppxProvisionedPackage -Online | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue
+
+    # 3. ביטול CPU Limits & Power Throttling
+    Write-Host "[+] Unlocking CPU Limits & Setting 100% Power..." -ForegroundColor Cyan
+    $PowerPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling"
+    if (!(Test-Path $PowerPath)) { New-Item -Path $PowerPath -Force | Out-Null }
+    Set-ItemProperty -Path $PowerPath -Name "PowerThrottlingOff" -Value 1 -ErrorAction SilentlyContinue
+    
+    # הגדרת המעבד למקסימום תמיד
+    try {
+        powercfg -setacvalueindex scheme_current sub_processor CPMINCORES 100 2>$null
+        powercfg -setacvalueindex scheme_current sub_processor PROCTHROTTLEMIN 100 2>$null
+        powercfg -setacvalueindex scheme_current sub_processor PROCTHROTTLEMAX 100 2>$null
+        powercfg -setactive scheme_current 2>$null
+    } catch { }
+
+    # 4. הגבלת עדכוני ווינדוס לעדכוני אבטחה בלבד
+    Write-Host "[+] Configuring Windows Updates: SECURITY ONLY..." -ForegroundColor Yellow
+    $UpdatePath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+    if (!(Test-Path $UpdatePath)) { New-Item -Path $UpdatePath -Force | Out-Null }
+    # ביטול עדכוני דרייברים ואפליקציות, השארת אבטחה בלבד
+    Set-ItemProperty -Path $UpdatePath -Name "AUOptions" -Value 2 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ExcludeWUDriversInQualityUpdate" -Value 1 -ErrorAction SilentlyContinue
+
+    # 5. אופטימיזציה למשחקים (System Profile)
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "SystemResponsiveness" -Value 0 -ErrorAction SilentlyContinue
+
+    Write-Host "[!] Killing Background Services..." -ForegroundColor Yellow
+    $Services = @(
+        "BDESVC", "iphlpsvc", "PhoneSvc", "Spooler", "PrintNotify", 
+        "QWAVE", "SCardSvr", "ScDeviceEnum", "SCPolicySvc", "lmhosts", 
+        "WSearch", "XboxGipSvc", "XblAuthManager", "XblGameSave", "XboxNetApiSvc"
+    )
+    foreach ($Svc in $Services) {
+        $SvcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$Svc"
+        if (Test-Path $SvcPath) {
+            Set-ItemProperty -Path $SvcPath -Name "Start" -Value 4 -ErrorAction SilentlyContinue
+        }
+        try { sc.exe stop $Svc > $null 2>&1 } catch { }
+    }
+
+    Write-Host "`nDONE!." -ForegroundColor Green
+    Write-Host "RESTART REQUIRED to apply The changes." -ForegroundColor Red
+}
+
     $close = New-Object System.Windows.Forms.Button
     $close.Text = 'Close'
     $close.Font = $btnFont
@@ -1182,6 +1239,7 @@ function Show-Menu {
     Write-Host " [15] PERFORMANCE CPU Tweaks" -ForegroundColor Cyan
     Write-Host " [16] Disable-CoreIsolation" -ForegroundColor Yellow
     Write-Host " [17] Remove Microsoft Store Apps Xbox,Phone link,Print3D" -ForegroundColor Cyan
+    Write-Host " [18] SMOKEY CUSTOM OPTIMIZE" -ForegroundColor Magenta
     Write-Host " [W] Check out the SMOKEY TWEAKS website to see what each tweak does " -ForegroundColor Cyan
     Write-Host " [A] APPLY ALL TWEAKS (!!!!! Risk of breaking Windows Only if you go to Extrem DEBLOAT !!!!!)" -ForegroundColor Red
     Write-Host "============================================================================================" -ForegroundColor Cyan
@@ -1223,6 +1281,7 @@ try {
             "15" { PERFORMANCE-CPU-Tweaks }
             "16" { Disable-CoreIsolation }
             "17" { Remove-MicrosoftStoreApps }
+            "18" { Smokey-Custom-Optimize }
             "W" { Start-Process 'https://smokeytweaks.lovable.app/' -ErrorAction SilentlyContinue }
             "A" {
                 Create-Smokey-Restore
