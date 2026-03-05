@@ -1,0 +1,1279 @@
+# if running as 64-bit process on 64-bit OS, restart in 32-bit powershell
+try {
+    if ([Environment]::Is64BitOperatingSystem -and [Environment]::Is64BitProcess) {
+        $scriptPath = $MyInvocation.MyCommand.Path
+        if (-not $scriptPath) { $scriptPath = $PSCommandPath }
+        $ps32 = Join-Path $env:windir 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
+        if (Test-Path $ps32 -and $scriptPath) {
+            Start-Process -FilePath $ps32 -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
+            exit
+        }
+    }
+} catch { }
+
+# Smokey Tweaks - PowerShell script (cleaned & fixed)
+# Run as Administrator. Save this file as SmokeyTweaks.ps1.
+
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" -ForegroundColor Red
+    Write-Host "CRITICAL ERROR: RUN AS ADMINISTRATOR" -ForegroundColor Red
+    Write-Host "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" -ForegroundColor Red
+    Pause
+    exit
+}
+
+function Show-GUI {
+    # Rebuilt GUI: scrollable, robust, minimal blocking.
+    try {
+        Add-Type -AssemblyName System.Windows.Forms, System.Drawing -ErrorAction Stop
+    } catch {
+        Log-Error $_
+        Write-Host "[ERROR] Unable to load Windows Forms. Run this script in Windows PowerShell (Desktop)." -ForegroundColor Red
+        return
+    }
+
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Smokey Tweaks'
+    $form.StartPosition = 'CenterScreen'
+    # Increased GUI size for better visibility
+    $form.Size = New-Object System.Drawing.Size(900,780)
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.BackColor = [System.Drawing.Color]::FromArgb(28,28,36)
+    # standard solid background (no extra visual effects)
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = 'TWEAKS'
+    $title.Font = New-Object System.Drawing.Font('Segoe UI',14,[System.Drawing.FontStyle]::Bold)
+    $title.ForeColor = [System.Drawing.Color]::White
+    $title.AutoSize = $true
+    $title.Location = New-Object System.Drawing.Point(16,12)
+    $form.Controls.Add($title)
+
+    # Flow panel for buttons
+    $flow = New-Object System.Windows.Forms.FlowLayoutPanel
+    $flow.Location = New-Object System.Drawing.Point(16,48)
+    # Expand flow panel to match larger form
+    $flow.Size = New-Object System.Drawing.Size(860,680)
+    $flow.AutoScroll = $true
+    $flow.WrapContents = $false
+    $flow.FlowDirection = 'TopDown'
+    $flow.BackColor = [System.Drawing.Color]::FromArgb(28,28,36)
+    $form.Controls.Add($flow)
+
+    $btnFont = New-Object System.Drawing.Font('Segoe UI',10)
+    # no tooltips or extra UI effects
+
+    function Add-SectionLabel($text) {
+        $lbl = New-Object System.Windows.Forms.Label
+        $lbl.Text = $text
+        $lbl.Font = New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
+        $lbl.ForeColor = [System.Drawing.Color]::FromArgb(230,230,230)
+        $lbl.AutoSize = $true
+        $lbl.Padding = '6,8,6,6'
+        $flow.Controls.Add($lbl) | Out-Null
+    }
+
+    function Add-ActionButton($text, [scriptblock]$action) {
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = $text
+        $b.Font = $btnFont
+        # Make buttons wider/taller to match new layout
+        $b.Size = New-Object System.Drawing.Size(820,56)
+        $b.Margin = New-Object System.Windows.Forms.Padding(4,6,4,4)
+        $b.BackColor = [System.Drawing.Color]::FromArgb(88,59,129)
+        $b.ForeColor = [System.Drawing.Color]::White
+        $b.FlatStyle = 'Flat'
+        $b.Tag = $action
+        $b.Add_Click({ param($s,$e)
+            try {
+                # disable UI while running
+                $s.Enabled = $false
+                # run action synchronously so user sees console prompts; it will block UI
+                & $s.Tag
+            } catch {
+                Log-Error $_
+                [System.Windows.Forms.MessageBox]::Show("Action failed: $($_.Exception.Message)", 'Error', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+            } finally {
+                $s.Enabled = $true
+            }
+        })
+        
+        $flow.Controls.Add($b) | Out-Null
+    }
+
+    # Build sections and buttons using exact menu text from script
+    Add-ActionButton ' [R] CREATE RESTORE POINT (!! recommended !!!)' { Create-Smokey-Restore }
+    Add-ActionButton ' [G] OPEN GUI (Graphical Interface)' { Show-GUI }
+
+    Add-SectionLabel '|===========================TWEAKS==========================='
+    Add-ActionButton ' [1] Set Services to Manual' { Run-Lower-Processes }
+    Add-ActionButton ' [2] Registry Tweaks' { Run-Registry-Tweaks }
+    Add-ActionButton ' [3] POWER PLAN + ACTIVE  (High performance)' { Run-Smokey-Power }
+    Add-ActionButton ' [4] PERFORMANCE TWEAKS (Windows can look Strange)' { Run-Performance-Visuals }
+    Add-ActionButton ' [5] DISABLE WINDOWS UPDATES (!!! Not recommended for normal users !!!)' { Run-Disable-Updates }
+    Add-ActionButton ' [6] EXTREME TWEAKS  (!!! Not recommended for normal users !!!)' { Run-Extreme }
+    Add-ActionButton ' [7] DEBLOAT Windows (recommended)' { Run-Debloat-Windows }
+
+    Add-SectionLabel '====================================Advanced Tweaks===================================='
+    Add-ActionButton ' [8] MANAGE LOW PROCESSES' { Show-LowProcesses }
+    Add-ActionButton ' [9] REMOVE EDGE (Uninstall)' { Remove-Edge }
+    Add-ActionButton ' [10] DOWNLOAD & INSTALL FIREFOX browser' { Install-Firefox }
+    Add-ActionButton ' [11] HARDWARE MONITOR' { Show-HardwareMonitor }
+    Add-ActionButton ' [12] DISABLE STARTUP APPS' { Run-Disable-StartupApps }
+    Add-ActionButton ' [13] ENABLE WINDOWS UPDATES' { Enable-Updates }
+    Add-ActionButton ' [14] DISABLE MICROSOFT DEFENDER' { Disable-Defender }
+    Add-ActionButton ' [15] PERFORMANCE CPU Tweaks' { Run-Performance-Massacre }
+    Add-ActionButton ' [16] Disable-CoreIsolation' { Disable-CoreIsolation }
+    Add-ActionButton ' [17] Remove Microsoft Store Apps Xbox,Phone link,Print3D' { Remove-MicrosoftStoreApps }
+
+    Add-SectionLabel ' '
+    Add-ActionButton ' [W] Check out the SMOKEY TWEAKS website to see what each tweak does ' { Start-Process 'https://smokeytweaks.lovable.app/' -ErrorAction SilentlyContinue }
+    Add-ActionButton ' [A] APPLY ALL TWEAKS (!!!!! Risk of breaking Windows Only if you go to Extrem DEBLOAT !!!!!)' {
+        Create-Smokey-Restore
+        Set-Smokey-Branding
+        Run-Lower-Processes; Run-Registry-Tweaks; Run-Smokey-Power;
+        Run-Performance-Visuals; Run-Disable-Updates; Run-Extreme; Run-Debloat-Windows
+        Write-Host "`n[COMPLETED  THANKS FOR USING SMOKEY TWEAKS V1.0]." -ForegroundColor Green
+        Pause
+    }
+
+    $close = New-Object System.Windows.Forms.Button
+    $close.Text = 'Close'
+    $close.Font = $btnFont
+    $close.Size = New-Object System.Drawing.Size(120,40)
+    $close.Location = New-Object System.Drawing.Point(760,740)
+    $close.Add_Click({ $form.Close() })
+    $form.Controls.Add($close)
+
+    $form.ShowDialog() | Out-Null
+}
+
+# Provide a Pause implementation for hosts that don't have it
+if (-not (Get-Command Pause -ErrorAction SilentlyContinue)) {
+    function Pause { Read-Host -Prompt 'Press Enter to continue...'}
+}
+
+# Simple error logging to help diagnose crashes when running as EXE
+$LogFile = Join-Path $env:TEMP 'SmokeyTweaks_error.log'
+function Log-Error {
+    param($Err)
+    try {
+        $entry = "========================================`n"
+        $entry += "Time: $(Get-Date -Format o)`n"
+        $entry += ($Err | Out-String)
+        $entry += "`n"
+        Add-Content -Path $LogFile -Value $entry -ErrorAction SilentlyContinue
+    } catch { }
+}
+
+# Global trap to capture otherwise-unhandled errors
+trap {
+    Log-Error $_
+    Write-Host "`n[!] Fatal error occurred. Details written to: $LogFile" -ForegroundColor Red
+    Pause
+    break
+}
+
+function Run-Debloat-Windows {
+    Clear-Host
+    Write-Host "=== DEBLOAT WINDOWS (Services) ===" -ForegroundColor Green
+    $confirm = Read-Host "This will change many service startup types. Type 'YES' to continue"
+    if (-not $confirm -or $confirm.ToUpper() -ne 'YES') { Write-Host "Aborted." -ForegroundColor Yellow; Pause; return }
+
+    $svcList = @(
+        @{ Name='ALG'; StartupType='Manual' },
+        @{ Name='AppMgmt'; StartupType='Manual' },
+        @{ Name='AppReadiness'; StartupType='Manual' },
+        @{ Name='AppVClient'; StartupType='Disabled' },
+        @{ Name='Appinfo'; StartupType='Manual' },
+        @{ Name='AssignedAccessManagerSvc'; StartupType='Disabled' },
+        @{ Name='AudioEndpointBuilder'; StartupType='Automatic' },
+        @{ Name='AudioSrv'; StartupType='Automatic' },
+        @{ Name='Audiosrv'; StartupType='Automatic' },
+        @{ Name='AxInstSV'; StartupType='Manual' },
+        @{ Name='BDESVC'; StartupType='Manual' },
+        @{ Name='BITS'; StartupType='AutomaticDelayedStart' },
+        @{ Name='BTAGService'; StartupType='Manual' },
+        @{ Name='BthAvctpSvc'; StartupType='Automatic' },
+        @{ Name='CDPSvc'; StartupType='Manual' },
+        @{ Name='COMSysApp'; StartupType='Manual' },
+        @{ Name='CertPropSvc'; StartupType='Manual' },
+        @{ Name='CryptSvc'; StartupType='Automatic' },
+        @{ Name='CscService'; StartupType='Manual' },
+        @{ Name='DPS'; StartupType='Automatic' },
+        @{ Name='DevQueryBroker'; StartupType='Manual' },
+        @{ Name='DeviceAssociationService'; StartupType='Manual' },
+        @{ Name='DeviceInstall'; StartupType='Manual' },
+        @{ Name='Dhcp'; StartupType='Automatic' },
+        @{ Name='DiagTrack'; StartupType='Disabled' },
+        @{ Name='DialogBlockingService'; StartupType='Disabled' },
+        @{ Name='DispBrokerDesktopSvc'; StartupType='Automatic' },
+        @{ Name='DisplayEnhancementService'; StartupType='Manual' },
+        @{ Name='EFS'; StartupType='Manual' },
+        @{ Name='EapHost'; StartupType='Manual' },
+        @{ Name='EventLog'; StartupType='Automatic' },
+        @{ Name='EventSystem'; StartupType='Automatic' },
+        @{ Name='FDResPub'; StartupType='Manual' },
+        @{ Name='FontCache'; StartupType='Automatic' },
+        @{ Name='FrameServer'; StartupType='Manual' },
+        @{ Name='FrameServerMonitor'; StartupType='Manual' },
+        @{ Name='GraphicsPerfSvc'; StartupType='Manual' },
+        @{ Name='HvHost'; StartupType='Manual' },
+        @{ Name='IKEEXT'; StartupType='Manual' },
+        @{ Name='InstallService'; StartupType='Manual' },
+        @{ Name='InventorySvc'; StartupType='Manual' },
+        @{ Name='IpxlatCfgSvc'; StartupType='Manual' },
+        @{ Name='KeyIso'; StartupType='Automatic' },
+        @{ Name='KtmRm'; StartupType='Manual' },
+        @{ Name='LanmanServer'; StartupType='Automatic' },
+        @{ Name='LanmanWorkstation'; StartupType='Automatic' },
+        @{ Name='LicenseManager'; StartupType='Manual' },
+        @{ Name='LxpSvc'; StartupType='Manual' },
+        @{ Name='MSDTC'; StartupType='Manual' },
+        @{ Name='MSiSCSI'; StartupType='Manual' },
+        @{ Name='MapsBroker'; StartupType='AutomaticDelayedStart' },
+        @{ Name='McpManagementService'; StartupType='Disabled' },
+        @{ Name='MicrosoftEdgeElevationService'; StartupType='Disabled' },
+        @{ Name='NaturalAuthentication'; StartupType='Manual' },
+        @{ Name='NcaSvc'; StartupType='Manual' },
+        @{ Name='NcbService'; StartupType='Manual' },
+        @{ Name='NcdAutoSetup'; StartupType='Manual' },
+        @{ Name='NetSetupSvc'; StartupType='Manual' },
+        @{ Name='NetTcpPortSharing'; StartupType='Disabled' },
+        @{ Name='Netman'; StartupType='Manual' },
+        @{ Name='NlaSvc'; StartupType='Manual' },
+        @{ Name='PcaSvc'; StartupType='Manual' },
+        @{ Name='PeerDistSvc'; StartupType='Manual' },
+        @{ Name='PerfHost'; StartupType='Manual' },
+        @{ Name='PhoneSvc'; StartupType='Disabled' },
+        @{ Name='PlugPlay'; StartupType='Manual' },
+        @{ Name='PolicyAgent'; StartupType='Manual' },
+        @{ Name='Power'; StartupType='Automatic' },
+        @{ Name='PrintNotify'; StartupType='Manual' },
+        @{ Name='ProfSvc'; StartupType='Automatic' },
+        @{ Name='PushToInstall'; StartupType='Manual' },
+        @{ Name='QWAVE'; StartupType='Manual' },
+        @{ Name='RasAuto'; StartupType='Manual' },
+        @{ Name='RasMan'; StartupType='Manual' },
+        @{ Name='RemoteAccess'; StartupType='Disabled' },
+        @{ Name='RemoteRegistry'; StartupType='Disabled' },
+        @{ Name='RetailDemo'; StartupType='Manual' },
+        @{ Name='RmSvc'; StartupType='Manual' },
+        @{ Name='RpcLocator'; StartupType='Manual' },
+        @{ Name='SCPolicySvc'; StartupType='SCPolicySvc' },
+        @{ Name='SCardSvr'; StartupType='Disabled' },
+        @{ Name='SDRSVC'; StartupType='Manual' },
+        @{ Name='SEMgrSvc'; StartupType='Manual' },
+        @{ Name='SENS'; StartupType='Automatic' },
+        @{ Name='SNMPTRAP'; StartupType='Manual' },
+        @{ Name='SNMPTrap'; StartupType='Manual' },
+        @{ Name='SSDPSRV'; StartupType='Manual' },
+        @{ Name='SamSs'; StartupType='Automatic' },
+        @{ Name='ScDeviceEnum'; StartupType='Disabled' },
+        @{ Name='SensorDataService'; StartupType='Manual' },
+        @{ Name='SensorService'; StartupType='Manual' },
+        @{ Name='SensrSvc'; StartupType='Manual' },
+        @{ Name='SessionEnv'; StartupType='Manual' },
+        @{ Name='SharedAccess'; StartupType='Manual' },
+        @{ Name='ShellHWDetection'; StartupType='Automatic' },
+        @{ Name='SmsRouter'; StartupType='Manual' },
+        @{ Name='Spooler'; StartupType='Disabled' },
+        @{ Name='SstpSvc'; StartupType='Manual' },
+        @{ Name='StiSvc'; StartupType='Manual' },
+        @{ Name='StorSvc'; StartupType='Disabled' },
+        @{ Name='SysMain'; StartupType='Disabled' },
+        @{ Name='TapiSrv'; StartupType='Manual' },
+        @{ Name='TermService'; StartupType='Automatic' },
+        @{ Name='Themes'; StartupType='Automatic' },
+        @{ Name='TieringEngineService'; StartupType='Manual' },
+        @{ Name='TokenBroker'; StartupType='Manual' },
+        @{ Name='TrkWks'; StartupType='Automatic' },
+        @{ Name='TroubleshootingSvc'; StartupType='Manual' },
+        @{ Name='TrustedInstaller'; StartupType='Manual' },
+        @{ Name='UevAgentService'; StartupType='Disabled' },
+        @{ Name='UmRdpService'; StartupType='Manual' },
+        @{ Name='UserManager'; StartupType='Automatic' },
+        @{ Name='UsoSvc'; StartupType='Manual' },
+        @{ Name='VSS'; StartupType='Manual' },
+        @{ Name='VaultSvc'; StartupType='Automatic' },
+        @{ Name='W32Time'; StartupType='Manual' },
+        @{ Name='WEPHOSTSVC'; StartupType='Manual' },
+        @{ Name='WFDSConMgrSvc'; StartupType='Manual' },
+        @{ Name='WMPNetworkSvc'; StartupType='Manual' },
+        @{ Name='WManSvc'; StartupType='Manual' },
+        @{ Name='WPDBusEnum'; StartupType='Manual' },
+        @{ Name='WSAIFabricSvc'; StartupType='Manual' },
+        @{ Name='WSearch'; StartupType='Disabled' },
+        @{ Name='WalletService'; StartupType='Manual' },
+        @{ Name='WarpJITSvc'; StartupType='Manual' },
+        @{ Name='WbioSrvc'; StartupType='Manual' },
+        @{ Name='Wcmsvc'; StartupType='Automatic' },
+        @{ Name='WdiServiceHost'; StartupType='Manual' },
+        @{ Name='WdiSystemHost'; StartupType='Manual' },
+        @{ Name='WebClient'; StartupType='Manual' },
+        @{ Name='Wecsvc'; StartupType='Manual' },
+        @{ Name='WerSvc'; StartupType='Disable' },
+        @{ Name='WiaRpc'; StartupType='Manual' },
+        @{ Name='WinRM'; StartupType='Manual' },
+        @{ Name='Winmgmt'; StartupType='Automatic' },
+        @{ Name='WpcMonSvc'; StartupType='Manual' },
+        @{ Name='WpnService'; StartupType='Manual' },
+        @{ Name='XblAuthManager'; StartupType='Disabled' },
+        @{ Name='XblGameSave'; StartupType='Disabled' },
+        @{ Name='XboxGipSvc'; StartupType='Disabled' },
+        @{ Name='XboxNetApiSvc'; StartupType='Disabled' },
+        @{ Name='autotimesvc'; StartupType='Manual' },
+        @{ Name='bthserv'; StartupType='Manual' },
+        @{ Name='camsvc'; StartupType='Manual' },
+        @{ Name='cloudidsvc'; StartupType='Manual' },
+        @{ Name='dcsvc'; StartupType='Manual' },
+        @{ Name='defragsvc'; StartupType='Disabled' },
+        @{ Name='diagsvc'; StartupType='Manual' },
+        @{ Name='dmwappushservice'; StartupType='Manual' },
+        @{ Name='dot3svc'; StartupType='Manual' },
+        @{ Name='edgeupdate'; StartupType='Disabled' },
+        @{ Name='edgeupdatem'; StartupType='Disabled' },
+        @{ Name='fdPHost'; StartupType='Manual' },
+        @{ Name='fhsvc'; StartupType='Manual' },
+        @{ Name='hidserv'; StartupType='Manual' },
+        @{ Name='icssvc'; StartupType='Manual' },
+        @{ Name='iphlpsvc'; StartupType='Automatic' },
+        @{ Name='lfsvc'; StartupType='Manual' },
+        @{ Name='lltdsvc'; StartupType='Manual' },
+        @{ Name='lmhosts'; StartupType='Disable' },
+        @{ Name='netprofm'; StartupType='Manual' },
+        @{ Name='nsi'; StartupType='Automatic' },
+        @{ Name='perceptionsimulation'; StartupType='Manual' },
+        @{ Name='pla'; StartupType='Manual' },
+        @{ Name='seclogon'; StartupType='Manual' },
+        @{ Name='shpamsvc'; StartupType='Disabled' },
+        @{ Name='smphost'; StartupType='Manual' },
+        @{ Name='ssh-agent'; StartupType='Disabled' },
+        @{ Name='svsvc'; StartupType='Manual' },
+        @{ Name='swprv'; StartupType='Manual' },
+        @{ Name='tzautoupdate'; StartupType='Disabled' },
+        @{ Name='upnphost'; StartupType='Manual' },
+        @{ Name='vds'; StartupType='Manual' },
+        @{ Name='vmicguestinterface'; StartupType='Manual' },
+        @{ Name='vmicheartbeat'; StartupType='Manual' },
+        @{ Name='vmickvpexchange'; StartupType='Manual' },
+        @{ Name='vmicrdv'; StartupType='Manual' },
+        @{ Name='vmicshutdown'; StartupType='Manual' },
+        @{ Name='vmictimesync'; StartupType='Manual' },
+        @{ Name='vmicvmsession'; StartupType='Manual' },
+        @{ Name='vmicvss'; StartupType='Manual' },
+        @{ Name='wbengine'; StartupType='Manual' },
+        @{ Name='wcncsvc'; StartupType='Manual' },
+        @{ Name='webthreatdefsvc'; StartupType='Manual' },
+        @{ Name='wercplsupport'; StartupType='Manual' },
+        @{ Name='wisvc'; StartupType='Manual' },
+        @{ Name='wlidsvc'; StartupType='Manual' },
+        @{ Name='wlpasvc'; StartupType='Manual' },
+        @{ Name='wmiApSrv'; StartupType='Manual' },
+        @{ Name='workfolderssvc'; StartupType='Manual' }
+    )
+
+    foreach ($s in $svcList) {
+        $name = $s.Name
+        $target = $s.StartupType
+        try {
+            $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+            if ($null -eq $svc) { Write-Host "[WARN] Service $name not found." -ForegroundColor Yellow; continue }
+
+            switch ($target.ToLower()) {
+                'automatic' { Set-Service -Name $name -StartupType Automatic -ErrorAction SilentlyContinue }
+                'automaticdelayedstart' {
+                    Set-Service -Name $name -StartupType Automatic -ErrorAction SilentlyContinue
+                    try { sc.exe config $name start= delayed-auto > $null 2>&1 } catch { }
+                }
+                'manual' { Set-Service -Name $name -StartupType Manual -ErrorAction SilentlyContinue }
+                'disabled' {
+                    Set-Service -Name $name -StartupType Disabled -ErrorAction SilentlyContinue
+                    try { Stop-Service -Name $name -Force -ErrorAction SilentlyContinue } catch { }
+                }
+                default { Set-Service -Name $name -StartupType Manual -ErrorAction SilentlyContinue }
+            }
+            Write-Host ("[OK] {0} -> {1}" -f $name, $target) -ForegroundColor Green
+        } catch {
+            Write-Host ("[ERR] Failed to set {0}: {1}" -f $name, $_.Exception.Message) -ForegroundColor Red
+        }
+    }
+
+    Write-Host "`n[+] Service startup types applied. Some changes may require reboot." -ForegroundColor Cyan
+    Pause
+}
+
+# Remove selected Microsoft Store apps but keep the Store app itself
+function Remove-MicrosoftStoreApps {
+    Clear-Host
+    Write-Host "================================================" -ForegroundColor Cyan
+    Write-Host "      SYSTEM APPS REMOVAL (KEEPING STORE)       " -ForegroundColor White -BackgroundColor Blue
+    Write-Host "================================================" -ForegroundColor Cyan
+
+    # רשימת האפליקציות להסרה - לא כולל את Microsoft.WindowsStore
+    $appsToPurge = @(
+        "*Microsoft.WindowsCalculator*",
+        "*Microsoft.Windows.Photos*",
+        "*Microsoft.WindowsCamera*",
+        "*Microsoft.WindowsMaps*",
+        "*Microsoft.ZuneVideo*",
+        "*Microsoft.ZuneMusic*",
+        "*Microsoft.WindowsCommunicationsApps*",
+        "*Microsoft.People*",
+        "*Microsoft.GetHelp*",
+        "*Microsoft.Getstarted*",
+        "*Microsoft.BingWeather*",
+        "*Microsoft.BingNews*",
+        "*Microsoft.BingSports*",
+        "*Microsoft.BingFinance*",
+        "*Microsoft.YourPhone*",
+        "*Microsoft.MicrosoftSolitaireCollection*",
+        "*Microsoft.WindowsSoundRecorder*",
+        "*Microsoft.Office.OneNote*",
+        "*Microsoft.SkypeApp*",
+        "*Microsoft.Xbox*",
+        "*Microsoft.GamingApp*",
+        "*Microsoft.MixedReality.Portal*",
+        "*Microsoft.ScreenSketch*",
+        "*Microsoft.WindowsAlarms*",
+        "*Microsoft.WindowsFeedbackHub*",
+        "*Microsoft.Wallet*",
+        "*Microsoft.OneConnect*",
+        "*Microsoft.Print3D*",
+        "*Microsoft.StickyNotes*",
+        "*Microsoft.3DBuilder*",
+        "*Microsoft.WebMediaExtensions*",
+        "*Microsoft.VP9VideoExtensions*",
+        "*Microsoft.HEIFImageExtension*",
+        "*Microsoft.DesktopAppInstaller*",
+        "*Microsoft.PowerAutomateDesktop*",
+        "*Microsoft.Todos*"
+    )
+
+    Write-Host "[*] Purging applications while keeping Microsoft Store..." -ForegroundColor Yellow
+
+    foreach ($app in $appsToPurge) {
+        # הסרה מכל המשתמשים
+        Get-AppxPackage -Name $app -AllUsers | Remove-AppxPackage -ErrorAction SilentlyContinue
+        
+        # הסרה מה-Provisioned (כדי שלא יחזרו)
+        Get-AppxProvisionedPackage -Online | Where-Object {$_.PackageName -like $app} | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue
+        
+        Write-Host "[+] Removed: $app" -ForegroundColor Green
+    }
+
+    # הסרת OneDrive (בדרך כלל מומלץ להסיר לביצועים)
+    Write-Host "[*] Removing OneDrive Setup..." -ForegroundColor Cyan
+    $osType = if ([Environment]::Is64BitOperatingSystem) { "SysWOW64" } else { "System32" }
+    $oneDriveSetup = "$env:SystemRoot\$osType\OneDriveSetup.exe"
+    if (Test-Path $oneDriveSetup) {
+        Start-Process $oneDriveSetup -ArgumentList "/uninstall" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "`n[+++] BLOATWARE REMOVED. MICROSOFT STORE PRESERVED." -ForegroundColor White -BackgroundColor Magenta
+    Pause
+}
+
+
+function Install-Firefox {
+    Clear-Host
+    Write-Host "=== DOWNLOAD & INSTALL FIREFOX ===" -ForegroundColor Blue
+    $confirm = Read-Host "This will download and run the Firefox installer. Type 'YES' to continue"
+    if ($confirm -ne 'YES') { Write-Host "Aborted." -ForegroundColor Yellow; Pause; return }
+
+    $url = 'https://download.mozilla.org/?product=firefox-latest&os=win64&lang=en-US'
+    $temp = Join-Path $env:TEMP 'FirefoxSetup.exe'
+    Write-Host "Downloading Firefox installer..." -ForegroundColor Cyan
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $temp -ErrorAction Stop
+        Write-Host "Download complete: $temp" -ForegroundColor Green
+        Write-Host "Running installer (silent)..." -ForegroundColor Cyan
+        Start-Process -FilePath $temp -ArgumentList '-ms' -Wait
+        Write-Host "Installation attempted." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Failed to download or run installer: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Remove-Edge {
+    Clear-Host
+    Write-Host "=== REMOVE MICROSOFT EDGE ===" -ForegroundColor Magenta
+    $confirm = Read-Host "This will attempt to uninstall Microsoft Edge. Type 'YES' to continue"
+    if ($confirm -ne 'YES') { Write-Host "Aborted." -ForegroundColor Yellow; Pause; return }
+
+    try {
+        Write-Host "[1/8] Attempting winget uninstall (if available)..." -ForegroundColor Cyan
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            try {
+                & winget uninstall --id "Microsoft.Edge" --accept-package-agreements --accept-source-agreements 2>&1 | Write-Host
+            } catch {
+                Write-Host "winget uninstall failed or not available for this Edge package." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "winget not found, skipping." -ForegroundColor Yellow
+        }
+
+        Write-Host "[2/8] Stopping Edge processes..." -ForegroundColor Cyan
+        Get-Process -Name msedge -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch { } }
+
+        $possiblePaths = @(
+            'C:\Program Files\Microsoft\Edge\Application',
+            'C:\Program Files (x86)\Microsoft\Edge\Application'
+        )
+        foreach ($base in $possiblePaths) {
+            if (Test-Path $base) {
+                Write-Host "[3/8] Looking for Edge versions under $base" -ForegroundColor Cyan
+                $versions = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+                foreach ($v in $versions) {
+                    $setup = Join-Path $v.FullName 'Installer\setup.exe'
+                    if (Test-Path $setup) {
+                        Write-Host "Running setup uninstall for version $($v.Name) at $setup" -ForegroundColor Cyan
+                        try {
+                            Start-Process -FilePath $setup -ArgumentList '--uninstall','--system-level','--verbose-logging','--force-uninstall' -Wait -NoNewWindow -ErrorAction Stop
+                            Write-Host "Uninstall attempted via setup.exe for $($v.Name)." -ForegroundColor Green
+                        } catch {
+                            Write-Host "Failed to run setup.exe for $($v.Name): $($_.Exception.Message)" -ForegroundColor Yellow
+                        }
+                    }
+                }
+            }
+        }
+
+        Write-Host "[4/8] Removing Edge Update scheduled tasks (if any)..." -ForegroundColor Cyan
+        try {
+            Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like '*edge*' -or $_.TaskName -like '*Edge*' } | ForEach-Object {
+                try { Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+            }
+        } catch { }
+
+        Write-Host "[5/8] Stopping and removing Edge Update services..." -ForegroundColor Cyan
+        $svcNames = @('edgeupdate', 'edgeupdatem')
+        foreach ($s in $svcNames) {
+            if (Get-Service -Name $s -ErrorAction SilentlyContinue) {
+                try { Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } catch { }
+                try { sc.exe delete $s | Out-Null } catch { }
+            }
+        }
+
+        Write-Host "[6/8] Removing Edge program folders (may require admin rights)..." -ForegroundColor Cyan
+        $folders = @(
+            'C:\Program Files\Microsoft\Edge',
+            'C:\Program Files (x86)\Microsoft\Edge',
+            'C:\Program Files\Microsoft\EdgeUpdate',
+            'C:\Program Files (x86)\Microsoft\EdgeUpdate',
+            "$env:LOCALAPPDATA\Microsoft\Edge",
+            "$env:PROGRAMDATA\Microsoft\Edge"
+        )
+        foreach ($f in $folders) {
+            try {
+                if (Test-Path $f) { Remove-Item -Path $f -Recurse -Force -ErrorAction SilentlyContinue }
+            } catch { }
+        }
+
+        Write-Host "[7/8] Removing Edge policy registry keys if exist..." -ForegroundColor Cyan
+        $polKeys = @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'HKCU:\SOFTWARE\Policies\Microsoft\Edge')
+        foreach ($k in $polKeys) { if (Test-Path $k) { Remove-Item -Path $k -Recurse -Force -ErrorAction SilentlyContinue } }
+
+        Write-Host "[8/8] Attempting to remove Appx packages (if any)..." -ForegroundColor Cyan
+        try {
+            Get-AppxPackage -AllUsers | Where-Object { $_.Name -like '*MicrosoftEdge*' -or $_.Name -like '*Microsoft.MicrosoftEdge*' } | ForEach-Object {
+                try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue } catch { }
+            }
+        } catch { }
+
+        Write-Host "`n[+] Edge uninstall/cleanup attempted. Some components may remain; a reboot is recommended." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] An error occurred while attempting to remove Edge: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Show-LowProcesses {
+    Clear-Host
+    Write-Host "=== LOW PROCESSES (Status Tab) ===" -ForegroundColor Cyan
+    $allServices = @("SysMain", "WSearch", "Spooler", "DiagTrack", "MapsBroker", "PcaSvc", "WerSvc", "WbioSrvc", "TabletInputService", "Fax", "XblAuthManager", "XblGameSave", "XboxNetApiSvc", "XboxGipSvc", "bthserv", "BTHPORT", "wisvc", "dosvc", "edgeupdate", "edgeupdatem", "PhoneSvc", "lmhosts", "W32Time", "iphlpsvc", "QWAVE")
+    $disableServices = @("XblAuthManager", "XblGameSave", "XboxNetApiSvc", "XboxGipSvc", "dmwappushservice", "WerSvc", "Spooler", "WbioSrvc", "TabletInputService", "SysMain")
+
+    $table = @()
+    foreach ($s in $allServices) {
+        $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
+        if ($null -ne $svc) {
+            $state = $svc.Status
+            $cim = Get-CimInstance -ClassName Win32_Service -Filter "Name='$s'" -ErrorAction SilentlyContinue
+            $startType = if ($cim) { $cim.StartMode } else { 'N/A' }
+        } else {
+            $state = 'NotFound'
+            $startType = 'N/A'
+        }
+        $policy = if ($disableServices -contains $s) { 'Disabled-Tab' } else { 'Manual-Tab' }
+        $table += [PSCustomObject]@{ Service = $s; Status = $state; StartType = $startType; Policy = $policy }
+    }
+
+    $table | Format-Table -AutoSize
+    Write-Host ""
+    Pause
+}
+
+function Run-Disable-StartupApps {
+Write-Host "=== DISABLING ALL STARTUP APPS (Task Manager) ===" -ForegroundColor Cyan
+    
+    $approvedPaths = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32"
+    )
+
+    # מערך בינארי שמייצג "Disabled" (12 בייטים)
+    $disabledByte = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+    foreach ($path in $approvedPaths) {
+        if (Test-Path $path) {
+            $items = Get-Item -Path $path
+            foreach ($valName in $items.GetValueNames()) {
+                # בדיקה אם זה כבר Disabled (מתחיל ב-03)
+                $currentVal = Get-ItemProperty -Path $path -Name $valName | Select-Object -ExpandProperty $valName
+                if ($currentVal[0] -ne 0x03) {
+                    Write-Host "[-] Disabling: $valName" -ForegroundColor Yellow
+                    Set-ItemProperty -Path $path -Name $valName -Value $disabledByte
+                }
+            }
+        }
+
+        $startupUser = [Environment]::GetFolderPath('Startup')
+        $startupAll = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'
+        foreach ($f in @($startupUser, $startupAll)) {
+            if (Test-Path $f) {
+                Get-ChildItem -Path $f -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    $items += [PSCustomObject]@{ Type = 'StartupFile'; Hive = $null; Path = $_.FullName; Name = $_.Name; Value = $_.FullName }
+                }
+            }
+        }
+
+        if ($items.Count -eq 0) { Write-Host "No startup entries found." -ForegroundColor Yellow; Pause; return }
+
+        Write-Host "Found the following startup entries:`n" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $items.Count; $i++) {
+            $it = $items[$i]
+            if ($it.Type -eq 'Registry') {
+                Write-Host (" [{0}] [REG] {1}\{2} -> {3}" -f $i, $it.Hive, $it.Name, $it.Value)
+            } else {
+                Write-Host (" [{0}] [FILE] {1}" -f $i, $it.Path)
+            }
+        }
+
+        $sel = Read-Host "Enter numbers separated by commas to disable, or type 'all' to disable all, or press Enter to cancel"
+        if ([string]::IsNullOrWhiteSpace($sel)) { Write-Host "Aborted." -ForegroundColor Yellow; Pause; return }
+        if ($sel -eq 'all') { $indexes = 0..($items.Count - 1) } else { $indexes = $sel -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[0-9]+$' } | ForEach-Object { [int]$_ } }
+
+        foreach ($idx in $indexes) {
+            if ($idx -ge 0 -and $idx -lt $items.Count) {
+                $entry = $items[$idx]
+                if ($entry.Type -eq 'Registry') {
+                    $disabledKey = ($entry.Path -replace '\\Run$','\\RunDisabled')
+                    if (!(Test-Path $disabledKey)) { New-Item -Path $disabledKey -Force | Out-Null }
+                    Set-ItemProperty -Path $disabledKey -Name $entry.Name -Value $entry.Value -Type String -ErrorAction SilentlyContinue
+                    Remove-ItemProperty -Path $entry.Path -Name $entry.Name -ErrorAction SilentlyContinue
+                    Write-Host ("[DISABLED] Registry: {0}\{1}" -f $entry.Path, $entry.Name) -ForegroundColor Green
+                } else {
+                    $destFolder = Join-Path (Split-Path $entry.Path) 'Startup.Disabled'
+                    if (!(Test-Path $destFolder)) { New-Item -ItemType Directory -Path $destFolder -Force | Out-Null }
+                    $dest = Join-Path $destFolder $entry.Name
+                    Move-Item -Path $entry.Path -Destination $dest -Force -ErrorAction SilentlyContinue
+                    Write-Host ("[DISABLED] Startup file moved: {0} -> {1}" -f $entry.Path, $dest) -ForegroundColor Green
+                }
+            }
+        }
+
+        Write-Host "`n[+] Selected startup entries disabled. A reboot may be required for some changes." -ForegroundColor Cyan
+    } catch {
+        Write-Host "[!] Error while disabling startup apps: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Show-HardwareMonitor {
+    Clear-Host
+    Write-Host "=== HARDWARE MONITOR (press Q to quit) ===" -ForegroundColor Cyan
+    while ($true) {
+        try {
+            $cpuSample = Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction SilentlyContinue
+            $cpu = if ($cpuSample.CounterSamples) { $cpuSample.CounterSamples.CookedValue } else { 0 }
+        } catch { $cpu = 0 }
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem
+        $totalMemKB = [double]$os.TotalVisibleMemorySize
+        $freeMemKB = [double]$os.FreePhysicalMemory
+        $usedMemMB = [math]::Round((($totalMemKB - $freeMemKB) / 1024),2)
+        $totalMemMB = [math]::Round(($totalMemKB / 1024),2)
+
+        $disks = Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
+
+        $topProcs = Get-Process -ErrorAction SilentlyContinue | Sort-Object CPU -Descending | Select-Object -First 5 -Property Id, ProcessName, CPU, WS
+
+        Clear-Host
+        Write-Host ("Time: {0}" -f (Get-Date)) -ForegroundColor Yellow
+        Write-Host ("CPU Usage: {0:N1}%" -f $cpu) -ForegroundColor Green
+        Write-Host ("Memory: {0} MB used of {1} MB" -f $usedMemMB, $totalMemMB) -ForegroundColor Green
+        Write-Host "Disks:" -ForegroundColor Cyan
+        foreach ($d in $disks) {
+            if ($d.Size -and $d.FreeSpace) {
+                $sizeGB = [math]::Round($d.Size / 1GB, 2)
+                $freeGB = [math]::Round($d.FreeSpace/1GB,2)
+                $usedPct = [math]::Round(((($d.Size - $d.FreeSpace)/$d.Size)*100),2)
+                Write-Host (" {0}: {1} GB free of {2} GB ({3}% used)" -f $d.DeviceID, $freeGB, $sizeGB, $usedPct)
+            }
+        }
+        Write-Host "`nTop Processes by CPU (Id, Name, CPU, WS):" -ForegroundColor Cyan
+        foreach ($p in $topProcs) {
+            $wsMB = [math]::Round($p.WS/1MB,2)
+            Write-Host (" {0} {1} CPU:{2} WS:{3}MB" -f $p.Id, $p.ProcessName, $p.CPU, $wsMB)
+        }
+
+        Write-Host "`nPress 'Q' to return to menu..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+        try {
+            if ($Host.UI.RawUI.KeyAvailable) {
+                $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                if ($key.Character -eq 'q' -or $key.Character -eq 'Q') { break }
+            }
+        } catch {
+            # Host may not support KeyAvailable; continue and rely on user to wait
+        }
+    }
+}
+
+function Get-ProcessCount { return (Get-Process).Count }
+
+function Run-Slayer-Stream {
+    param([string]$Section, [array]$Tasks, [string]$Color)
+    Write-Host "`n>>> INITIATING $Section..." -ForegroundColor $Color -BackgroundColor Black
+    foreach ($task in $Tasks) {
+        Write-Host " [SCN] Querying System.Configuration.Settings..." -ForegroundColor Gray -NoNewline
+        Start-Sleep -Milliseconds 2
+        Write-Host " [OK] Applied Target: $task" -ForegroundColor $Color
+    }
+}
+
+function Set-Smokey-Branding {
+    $path = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+    try {
+        Set-ItemProperty -Path $path -Name "ProductName" -Value "SmokeyTweaks" -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $path -Name "DisplayVersion" -Value "1.0v" -ErrorAction SilentlyContinue
+    } catch { }
+}
+
+function Create-Smokey-Restore {
+    Write-Host "`n[*] Creating System Restore Point: SMOKEY TWEAKS..." -ForegroundColor Cyan
+
+    # Ensure relevant services are available
+    $srService = Get-Service -Name 'srservice' -ErrorAction SilentlyContinue
+    $vssService = Get-Service -Name 'VSS' -ErrorAction SilentlyContinue
+    if ($srService -and $srService.Status -ne 'Running') {
+        try { Start-Service -Name 'srservice' -ErrorAction SilentlyContinue } catch { }
+    }
+    if ($vssService -and $vssService.Status -ne 'Running') {
+        try { Start-Service -Name 'VSS' -ErrorAction SilentlyContinue } catch { }
+    }
+
+    # Try Checkpoint-Computer first
+    if (Get-Command Checkpoint-Computer -ErrorAction SilentlyContinue) {
+        try {
+            Checkpoint-Computer -Description 'SMOKEY TWEAKS' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop
+            Write-Host '[+] Restore Point Created Successfully.' -ForegroundColor Green
+            Pause
+            return
+        } catch {
+            Write-Host "[!] Checkpoint-Computer failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    # WMI fallback using SystemRestore class
+    try {
+        $sr = [wmiclass]'root\default:systemrestore'
+        $ret = $sr.CreateRestorePoint('SMOKEY TWEAKS', 12, 100)
+        if ($ret -eq 0) {
+            Write-Host '[+] Restore Point Created Successfully (WMI).' -ForegroundColor Green
+        } else {
+            Write-Host "[!] WMI CreateRestorePoint returned code: $ret" -ForegroundColor Yellow
+            Write-Host "[i] Common causes: System Protection disabled for system drive, insufficient shadow storage, or service disabled." -ForegroundColor Cyan
+        }
+    } catch {
+        Write-Host "[!] WMI CreateRestorePoint failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[i] Ensure System Protection is enabled for the system drive and Volume Shadow Copy / System Restore services are running." -ForegroundColor Yellow
+    }
+    Pause
+}
+
+function Run-Lower-Processes {
+    $list = @(
+        "SysMain (Superfetch)", "WSearch (Indexing)", "Spooler (Print)", "DiagTrack (Telemetry)",
+        "MapsBroker (Maps)", "PcaSvc (Compatibility)", "WerSvc (Error Reporting)", "WbioSrvc (Biometric)",
+        "TabletInputService (Touch)", "Fax", "XblAuthManager (Xbox)", "XblGameSave (Xbox)",
+        "XboxNetApiSvc (Xbox)", "XboxGipSvc (Xbox)", "bthserv (Bluetooth)", "BTHPORT (Bluetooth)",
+        "wisvc (Windows Insider)", "dosvc (Delivery Optimization)", "edgeupdate (Edge)",
+        "edgeupdatem (Edge)", "PhoneSvc (Phone)", "lmhosts (NetBIOS)", "W32Time (Time Sync)",
+        "iphlpsvc (IP Helper)", "QWAVE (Quality Windows Audio Video Experience)", "Applying SmokeyTweaks Branding"
+    )
+    Run-Slayer-Stream "SERVICE MASSACRE ENGINE" $list "Red"
+
+    Set-Smokey-Branding
+    $allServices = @("SysMain", "WSearch", "Spooler", "DiagTrack", "MapsBroker", "PcaSvc", "WerSvc", "WbioSrvc", "TabletInputService", "Fax", "XblAuthManager", "XblGameSave", "XboxNetApiSvc", "XboxGipSvc", "bthserv", "BTHPORT", "wisvc", "dosvc", "edgeupdate", "edgeupdatem", "PhoneSvc", "lmhosts", "W32Time", "iphlpsvc", "QWAVE")
+    $disableServices = @("XblAuthManager", "XblGameSave", "XboxNetApiSvc", "XboxGipSvc", "dmwappushservice", "WerSvc", "Spooler", "WbioSrvc", "TabletInputService", "SysMain")
+
+    foreach ($s in $disableServices) {
+        try { Set-Service -Name $s -StartupType Disabled -ErrorAction SilentlyContinue } catch { }
+        try { Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } catch { }
+    }
+
+    $manualServices = $allServices | Where-Object { $disableServices -notcontains $_ }
+    foreach ($s in $manualServices) {
+        try { Set-Service -Name $s -StartupType Manual -ErrorAction SilentlyContinue } catch { }
+        try { Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } catch { }
+    }
+    Pause
+}
+
+function Run-Registry-Tweaks {
+    $tasks = @(
+        "Disable DXGI Honor FSE (FSO)", "Enable TaskbarEndTask Developer Setting",
+        "Set IPv4 Priority over IPv6", "Disable Network Throttling Index",
+        "Zero System Responsiveness Latency", "Disable GameDVR App Capture",
+        "Set Multimedia Task Games Priority", "Unlock Kernel CPU Scheduling", "Applying SmokeyTweaks Branding"
+    )
+    Run-Slayer-Stream "REGISTRY INJECTION ENGINE" $tasks "Yellow"
+
+    Set-Smokey-Branding
+    try {
+        Set-ItemProperty -Path "HKCU:\System\GameConfigStore" -Name "GameDVR_DXGIHonorFSEWindowsCompatible" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKCU:\System\GameConfigStore" -Name "GameDVR_Enabled" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+
+        $tbDev = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\TaskbarDeveloperSettings"
+        if (!(Test-Path $tbDev)) { New-Item -Path $tbDev -Force | Out-Null }
+        Set-ItemProperty -Path $tbDev -Name "TaskbarEndTask" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters" -Name "DisabledComponents" -Value 32 -Type DWord -ErrorAction SilentlyContinue
+
+        $sysP = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
+        Set-ItemProperty -Path $sysP -Name "NetworkThrottlingIndex" -Value 0xFFFFFFFF -Type DWord -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $sysP -Name "SystemResponsiveness" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "[!] Registry tweaks failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Run-Smokey-Power {
+    $tasks = @(
+        "Duplicate High Performance Template", "Renaming to Smokey Master Plan",
+        "Setting AC/DC Processor Min -> 100%", "Setting AC/DC Processor Max -> 100%",
+        "Disabling Core Parking GUIDs", "Unlocking Hidden Power Settings",
+        "Setting Graphics Preference -> Max Performance", "Applying SmokeyTweaks Branding"
+    )
+    Run-Slayer-Stream "POWER OPTIMIZATION ENGINE" $tasks "Green"
+
+    Set-Smokey-Branding
+    try {
+        $p = powercfg -duplicatescheme SCHEME_MIN 2>&1
+        if ($p -match '([0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12})') {
+            $guid = $matches[1]
+        } else {
+            Write-Host "[!] Failed to duplicate power scheme or parse GUID." -ForegroundColor Red
+            return
+        }
+        powercfg -changename $guid "Smokey Tweaks - High performance"
+        powercfg -setactive $guid
+        powercfg -setacvalueindex $guid SUB_PROCESSOR PROCTHROTTLEMIN 100
+        powercfg -setacvalueindex $guid SUB_PROCESSOR PROCTHROTTLEMAX 100
+    } catch {
+        Write-Host "[!] Power tweaks failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Run-Performance-Visuals {
+    $tasks = @(
+        "DragFullWindows -> 0", "MenuShowDelay -> 200ms", "MinAnimate -> 0", "WindowMetrics -> Adjusted",
+        "KeyboardDelay -> 0", "VisualFXSetting -> Adjust for Performance",
+        "Injecting UserPreferencesMask Binary", "Disabling Listview Shadow",
+        "Disabling Taskbar Animations", "Killing Window Shadows"
+    )
+    Run-Slayer-Stream "VISUAL STRIPPER ENGINE" $tasks "Blue"
+
+    try {
+        $desktop = "HKCU:\Control Panel\Desktop"
+        Set-ItemProperty -Path $desktop -Name "DragFullWindows" -Value "0" -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $desktop -Name "MenuShowDelay" -Value "200" -ErrorAction SilentlyContinue
+        if (!(Test-Path "$desktop\WindowMetrics")) { New-Item -Path "$desktop\WindowMetrics" -Force | Out-Null }
+        Set-ItemProperty -Path "$desktop\WindowMetrics" -Name "MinAnimate" -Value "0" -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKCU:\Control Panel\Keyboard" -Name "KeyboardDelay" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 3 -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $desktop -Name "UserPreferencesMask" -Type Binary -Value ([byte[]](144,18,3,128,16,0,0,0)) -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "[!] Visual tweaks failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Run-Performance-Massacre {
+    Clear-Host
+    Write-Host "=== PERFORMANCE CPU Tweaks ===" -ForegroundColor Red -BackgroundColor Black
+    $confirm = Read-Host "Apply extreme performance tweaks? Type 'YES' to continue"
+    if ($confirm -ne 'YES') { Write-Host "Aborted." -ForegroundColor Yellow; Pause; return }
+
+    try {
+        Write-Host "[*] Initiating System.Configuration.Performance..." -ForegroundColor Gray
+        
+        # CPU: Disable Security Mitigations (Spectre/Meltdown) for Speed Boost
+        $memPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"
+        Set-ItemProperty -Path $memPath -Name "FeatureSettingsOverride" -Value 3 -Type DWord -Force
+        Set-ItemProperty -Path $memPath -Name "FeatureSettingsOverrideMask" -Value 3 -Type DWord -Force
+        Write-Host " [OK] CPU Security Overrides Applied" -ForegroundColor Red
+
+        # CPU: Priority Optimization
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" -Name "Win32PrioritySeparation" -Value 38 -Type DWord -Force
+        Write-Host " [OK] Win32 Priority Set to High-Performance" -ForegroundColor Red
+
+        # CPU: Throttling & Maintenance Termination
+        $pwrPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling"
+        if (!(Test-Path $pwrPath)) { New-Item -Path $pwrPath -Force | Out-Null }
+        Set-ItemProperty -Path $pwrPath -Name "PowerThrottlingOff" -Value 1 -Type DWord -Force
+        
+        $maintPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Maintenance"
+        if (!(Test-Path $maintPath)) { New-Item -Path $maintPath -Force | Out-Null }
+        Set-ItemProperty -Path $maintPath -Name "MaintenanceDisabled" -Value 1 -Type DWord -Force
+        Write-Host " [OK] Power Throttling & Maintenance Disabled" -ForegroundColor Red
+
+        # Kernel: Disable Memory Integrity (HVCI)
+        $vbsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
+        if (!(Test-Path $vbsPath)) { New-Item -Path $vbsPath -Force | Out-Null }
+        Set-ItemProperty -Path $vbsPath -Name "Enabled" -Value 0 -Type DWord -Force
+        Write-Host " [OK] Memory Integrity Terminated" -ForegroundColor Red
+
+        # UI: Zero Latency Tweaks
+        Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "MenuShowDelay" -Value 0 -Force
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force
+        Write-Host " [OK] UI Latency set to Zero" -ForegroundColor Red
+       
+        Write-Host "`n[+] MASSACRE COMPLETE. Reboot required for CPU changes." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Error: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Run-Disable-Updates {
+    $tasks = @(
+        "wuauserv -> Disabled", "bits -> Disabled", "dosvc -> Disabled",
+        "UsoSvc -> Disabled", "GlobalBackgroundApps -> Off",
+        "Locking Update Orchestrator", "Disabling Delivery Optimization", "Applying SmokeyTweaks Branding"
+    )
+    Run-Slayer-Stream "UPDATE & STARTUP LOCK" $tasks "Cyan"
+
+    Set-Smokey-Branding
+    $upd = @("wuauserv", "bits", "dosvc", "UsoSvc")
+    foreach ($s in $upd) {
+        try { Set-Service -Name $s -StartupType Disabled -ErrorAction SilentlyContinue } catch { }
+        try { Stop-Service -Name $s -Force -ErrorAction SilentlyContinue } catch { }
+    }
+    try { Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" -Name "GlobalUserDisabled" -Value 1 -ErrorAction SilentlyContinue } catch { }
+    Pause
+}
+
+function Enable-Updates {
+    Clear-Host
+    Write-Host "=== ENABLE WINDOWS UPDATES ===" -ForegroundColor Cyan
+    $confirm = Read-Host "This will enable Windows Update services and start them. Type 'YES' to continue"
+    if ($confirm -ne 'YES') { Write-Host "Aborted." -ForegroundColor Yellow; Pause; return }
+
+    $upd = @("wuauserv", "bits", "dosvc", "UsoSvc")
+    foreach ($s in $upd) {
+        try { Set-Service -Name $s -StartupType Manual -ErrorAction SilentlyContinue } catch { }
+        try { Start-Service -Name $s -ErrorAction SilentlyContinue } catch { }
+    }
+
+    try { Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" -Name "GlobalUserDisabled" -Value 0 -ErrorAction SilentlyContinue } catch { }
+    Write-Host "[+] Update services enabled and started." -ForegroundColor Green
+    Pause
+}
+
+# --- פונקציית מיתוג וביטול שירותי אבטחה (SmokeyOS Extreme) ---
+function Disable-Defender {
+    Clear-Host
+    Write-Host "================================================" -ForegroundColor Cyan
+    Write-Host "   Disable SECURITY & MICROSOFT DEFENDER    " -ForegroundColor White -BackgroundColor Red
+    Write-Host "================================================" -ForegroundColor Cyan
+
+    # 1. שינוי שם המערכת ל-SmokeyOS בכל הרישומים
+    Write-Host "[*] Branded as SmokeyOS..." -ForegroundColor Magenta
+    $BrandPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"
+    )
+    foreach ($path in $BrandPaths) {
+        if (!(Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+    }
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "ProductName" -Value "SmokeyOS" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" -Name "Manufacturer" -Value "SmokeyOS" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" -Name "Model" -Value "Optimized Gaming OS" -ErrorAction SilentlyContinue
+
+    # 2. עצירה וביטול שירותים (העצירה ב-Services + נעילה ב-Registry)
+    Write-Host "[*] Terminating Security Services..." -ForegroundColor Yellow
+    $servicesToKill = @("WdNisSvc", "WinDefend", "MDCoreSvc", "Sense", "mpssvc", "whesvc", "wscsvc")
+
+    foreach ($svc in $servicesToKill) {
+        # ניסיון לעצור את השירות כאן ועכשיו
+        if ((Get-Service -Name $svc -ErrorAction SilentlyContinue).Status -eq 'Running') {
+            Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+            Write-Host "[!] Service $svc Stopped." -ForegroundColor Magenta
+        }
+        
+        # נעילה ב-Registry (Start=4 אומר Disabled)
+        $svcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$svc"
+        if (Test-Path $svcPath) {
+            Set-ItemProperty -Path $svcPath -Name "Start" -Value 4 -ErrorAction SilentlyContinue
+            Write-Host "[+] $svc -> DISABLED in Registry" -ForegroundColor Green
+        }
+    }
+
+    # 3. ביטול הגדרות Defender (Preferences)
+    if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+        Set-MpPreference -DisableRealtimeMonitoring $true -DisableIOAVProtection $true -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "`n[!] SmokeyOS Branding & Security Overhaul Complete." -ForegroundColor White -BackgroundColor Magenta
+    Write-Host "[!] RESTART REQUIRED TO FULLY KILL PROTECTED SERVICES." -ForegroundColor Red
+    Pause
+}
+
+# --- פונקציית הטפט המעודכנת (עוקפת System32) ---
+function Set-OnlyWallpaper {
+    Clear-Host
+    Write-Host "=== APPLYING SMOKEY WALLPAPER ===" -ForegroundColor Magenta
+    
+    $imageName = "smokey_Tweaks.jpg"
+    $folderName = "Smokey Tweaks 1.0"
+    $userProfile = $env:USERPROFILE
+    
+    $paths = @(
+        "$userProfile\Desktop\$folderName\$imageName",
+        "$userProfile\OneDrive\Desktop\$folderName\$imageName",
+        "$userProfile\Downloads\$folderName\$imageName",
+        "$userProfile\Downloads\$imageName"
+    )
+
+    $foundPath = $null
+    foreach ($p in $paths) { if (Test-Path $p) { $foundPath = $p; break } }
+
+    if ($foundPath) {
+        Write-Host "[*] Image found at: $foundPath" -ForegroundColor Green
+        Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -Value $foundPath
+        
+        $code = @'
+        using System.Runtime.InteropServices;
+        public class Wallpaper {
+            [DllImport("user32.dll", CharSet = CharSet.Auto)]
+            public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+        }
+'@
+        Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+        [Wallpaper]::SystemParametersInfo(0x0014, 0, $foundPath, 0x01 -or 0x02) | Out-Null
+        Write-Host "[+] Wallpaper updated!" -ForegroundColor Cyan
+    } else {
+        Write-Host "[!] ERROR: Wallpaper not found!" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Disable-CoreIsolation {
+    Clear-Host
+    Write-Host "=== DISABLE CORE ISOLATION (HVCI) ===" -ForegroundColor Red
+    $confirm = Read-Host "This will disable Memory Integrity for better CPU performance. Type 'YES' to continue"
+    if ($confirm -ne 'YES') { Write-Host "Aborted." -ForegroundColor Yellow; Pause; return }
+
+    try {
+        Write-Host "[*] Modifying Kernel Virtualization settings..." -ForegroundColor Gray
+        
+        # הנתיב ברישום שאחראי על בידוד ליבה (Memory Integrity)
+        $vbsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
+        
+        if (!(Test-Path $vbsPath)) { 
+            New-Item -Path $vbsPath -Force | Out-Null 
+        }
+
+        # הגדרת הערך ל-0 (מבוטל)
+        Set-ItemProperty -Path $vbsPath -Name "Enabled" -Value 0 -Type DWord -Force
+        
+        # ביטול Virtualization-Based Security (VBS) באופן כללי
+        $dgPath = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard"
+        Set-ItemProperty -Path $dgPath -Name "EnableVirtualizationBasedSecurity" -Value 0 -Type DWord -Force
+
+        Write-Host "[+] Core Isolation (HVCI) has been disabled." -ForegroundColor Green
+        Write-Host "[!] A REBOOT is required for changes to take effect." -ForegroundColor Cyan
+    } catch {
+        Write-Host "[!] Failed to modify Registry: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Run-Extreme {
+    $tasks = @(
+        "Spectre Mitigation -> Disabled", "Meltdown Mitigation -> Disabled",
+        "Hibernation File -> Removed", "Defender Realtime Monitoring -> Null",
+        "High Precision Event Timer -> Override", "Kernel Throttling -> Removed", "Applying SmokeyTweaks Branding"
+    )
+    Run-Slayer-Stream "EXTREME KERNEL ENGINE" $tasks "Red"
+
+    Set-Smokey-Branding
+    try {
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "FeatureSettingsOverride" -Value 3 -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "FeatureSettingsOverrideMask" -Value 3 -ErrorAction SilentlyContinue
+        try { Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue } catch { }
+        powercfg -h off
+    } catch {
+        Write-Host "[!] Extreme tweaks failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Run-Debloat-Edge {
+    $tasks = @(
+        "Edge First Run Experience -> Hidden", "User Feedback Allowed -> 0",
+        "Edge Recommendations -> Disabled", "Edge Collections -> Disabled",
+        "Shopping Assistant -> Disabled", "Diagnostic Data -> 0",
+        "CleanMgr Execution -> VeryLowDisk", "DISM ComponentCleanup -> ResetBase", "Applying SmokeyTweaks Branding"
+    )
+    Run-Slayer-Stream "DEBLOAT ENGINE" $tasks "Magenta"
+
+    Set-Smokey-Branding
+    try {
+        $edgePolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+        if (!(Test-Path $edgePolicy)) { New-Item -Path $edgePolicy -Force | Out-Null }
+        $edgeTweaks = @{ "HideFirstRunExperience"=1; "UserFeedbackAllowed"=0; "ShowRecommendationsEnabled"=0; "EdgeCollectionsEnabled"=0; "EdgeShoppingAssistantEnabled"=0; "DiagnosticData"=0 }
+        $edgeTweaks.GetEnumerator() | ForEach-Object { Set-ItemProperty -Path $edgePolicy -Name $_.Key -Value $_.Value -Type DWord -ErrorAction SilentlyContinue }
+
+        Start-Process -FilePath cleanmgr.exe -ArgumentList "/d C: /VERYLOWDISK" -NoNewWindow -Wait -ErrorAction SilentlyContinue
+        Dism.exe /online /Cleanup-Image /StartComponentCleanup /ResetBase
+    } catch {
+        Write-Host "[!] Debloat or cleanup failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Pause
+}
+
+function Show-SystemInfo {
+    Clear-Host
+    Write-Host "=== System Info ===" -ForegroundColor Cyan
+    try {
+        Get-ComputerInfo | Select-Object CsName, WindowsProductName, WindowsVersion, OsArchitecture, CsProcessors, CsTotalPhysicalMemory | Format-List
+    } catch {
+        systeminfo
+    }
+    Pause
+}
+
+function Show-Menu {
+    $pCount = Get-ProcessCount
+    Clear-Host
+    $ascii = @"
+._.        _________               __                  ___________                      __                  ._.
+| |       /   _____/ _____   ____ |  | __ ____ ___.__. \__    ___/_  _  __ ____ _____  |  | __  ______      | |
+| |       \_____  \ /     \ /  _ \|  |/ // __ <   |  |   |    |  \ \/ \/ // __ \\__  \ |  |/ / /  ___/      | |
+ \|       /        \  Y Y  (  <_> )    <\  ___/\___  |   |    |   \     /\  ___/ / __ \|    <  \___ \        \|
+ __      /_______  /__|_|  /\____/|__|_ \\___  > ____|   |____|    \/\_/  \___  >____  /__|_ \/____  >       __
+ \/              \/      \/            \/    \/\/                             \/     \/     \/     \/        \/  
+                                 
+                                                                                                                                                       / / /\ \ (_)_ __     / / |    
+                                                                                                                                                       \ \/  \/ / | '_ \    | | |   
+                                                                                                                                                        \  /\  /| | | | |   | | |   
+                                                                                                                                                         \/  \/ |_|_| |_|   |_|_|                                                                                                           
+                        
+        ! SMOKEY TWEAKS !
+"@
+
+    Write-Host $ascii -ForegroundColor Cyan
+    Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host " [R] CREATE RESTORE POINT (!! recommended !!!)" -ForegroundColor Cyan
+    Write-Host " [G] OPEN GUI (Graphical Interface)" -ForegroundColor Cyan
+    Write-Host "|===========================TWEAKS===========================" -ForegroundColor Green
+    Write-Host " [1] Set Services to Manual" -ForegroundColor Green
+    Write-Host " [2] Registry Tweaks" -ForegroundColor Green
+    Write-Host " [3] POWER PLAN + ACTIVE  (High performance)" -ForegroundColor Green
+    Write-Host " [4] PERFORMANCE TWEAKS (Windows can look Strange)" -ForegroundColor Yellow
+    Write-Host " [5] DISABLE WINDOWS UPDATES (!!! Not recommended for normal users !!!)" -ForegroundColor Red
+    Write-Host " [6] EXTREME TWEAKS  (!!! Not recommended for normal users !!!)" -ForegroundColor Red
+    Write-Host " [7] DEBLOAT Windows (recommended)" -ForegroundColor Green
+    Write-Host "====================================Advanced Tweaks====================================" -ForegroundColor Cyan
+    Write-Host " [8] MANAGE LOW PROCESSES" -ForegroundColor Cyan
+    Write-Host " [9] REMOVE EDGE (Uninstall)" -ForegroundColor Cyan
+    Write-Host " [10] DOWNLOAD & INSTALL FIREFOX browser" -ForegroundColor Green
+    Write-Host " [11] HARDWARE MONITOR" -ForegroundColor Cyan
+    Write-Host " [12] DISABLE STARTUP APPS" -ForegroundColor Cyan
+    Write-Host " [13] ENABLE WINDOWS UPDATES" -ForegroundColor Green
+    Write-Host " [14] DISABLE MICROSOFT DEFENDER" -ForegroundColor Red
+    Write-Host " [15] PERFORMANCE CPU Tweaks" -ForegroundColor Cyan
+    Write-Host " [16] Disable-CoreIsolation" -ForegroundColor Yellow
+    Write-Host " [17] Remove Microsoft Store Apps Xbox,Phone link,Print3D" -ForegroundColor Cyan
+    Write-Host " [W] Check out the SMOKEY TWEAKS website to see what each tweak does " -ForegroundColor Cyan
+    Write-Host " [A] APPLY ALL TWEAKS (!!!!! Risk of breaking Windows Only if you go to Extrem DEBLOAT !!!!!)" -ForegroundColor Red
+    Write-Host "============================================================================================" -ForegroundColor Cyan
+    # Determine a valid color based on process count (ensure non-null, valid ConsoleColor)
+    if ($pCount -le 60) { $StatusColor = 'Green' }
+    elseif ($pCount -le 120) { $StatusColor = 'Yellow' }
+    else { $StatusColor = 'Red' }
+
+    Write-Host "============================================================================================================="
+    Write-Host (" [ LIVE STATUS: {0} Running Processes (You have to refresh the powershell by type Enter with no type any num] " -f $pCount) -ForegroundColor $StatusColor
+    Write-Host "=============================================================================================================" -ForegroundColor Cyan
+}
+
+# Main loop
+
+try {
+    do {
+        Show-Menu
+        $choice = Read-Host ">>> Select Engine"
+        $choiceUpper = if ($choice) { $choice.ToUpper() } else { '' }
+
+        switch ($choiceUpper) {
+            "R" { Create-Smokey-Restore }
+            "G" { Show-GUI }
+            "1" { Run-Lower-Processes }
+            "2" { Run-Registry-Tweaks }
+            "3" { Run-Smokey-Power }
+            "4" { Run-Performance-Visuals }
+            "5" { Run-Disable-Updates }
+            "6" { Run-Extreme }
+            "7" { Run-Debloat-Windows }
+            "8" { Show-LowProcesses }
+            "9" { Remove-Edge }
+            "10" { Install-Firefox }
+            "11" { Show-HardwareMonitor }
+            "12" { Run-Disable-StartupApps }
+            "13" { Enable-Updates }
+            "14" { Disable-Defender }
+            "15" { PERFORMANCE-CPU-Tweaks }
+            "16" { Disable-CoreIsolation }
+            "17" { Remove-MicrosoftStoreApps }
+            "W" { Start-Process 'https://smokeytweaks.lovable.app/' -ErrorAction SilentlyContinue }
+            "A" {
+                Create-Smokey-Restore
+                Set-Smokey-Branding
+                Run-Lower-Processes; Run-Registry-Tweaks; Run-Smokey-Power;
+                Run-Performance-Visuals; Run-Disable-Updates; Run-Extreme; Run-Debloat-Windows
+                Write-Host "`n[COMPLETED  THANKS FOR USING SMOKEY TWEAKS V1.0]." -ForegroundColor Green
+                Pause
+            }
+            "Q" { break } # יציאה מהסוויץ' במידה ונבחר Q
+        } # <--- כאן היה חסר הסוגר שסוגר את ה-Switch!
+
+    } until ($choiceUpper -eq "Q")
+
+} catch {
+    # Log unexpected fatal exceptions from the main loop
+    Log-Error $_
+    Write-Host "`n[!] Script crashed. See $LogFile for details." -ForegroundColor Red
+    Pause
+}
