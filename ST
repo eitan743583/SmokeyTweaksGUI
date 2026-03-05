@@ -1004,103 +1004,54 @@ function Enable-Updates {
 function Disable-Defender {
     Clear-Host
     Write-Host "--- SMOKEY TWEAKS: KILLING ALL SECURITY SYSTEMS ---" -ForegroundColor Red -BackgroundColor Black
-    Write-Host "Please make sure 'Tamper Protection' is OFF in Windows Settings!" -ForegroundColor Yellow
+    Write-Host "DELETING DEFENDER FROM SETTINGS AND CORE..." -ForegroundColor Yellow
 
-    # 1. ביטול Defender דרך MpPreference (הגדרות פנימיות)
-    Write-Host "[*] Disabling Defender Real-Time Protection..." -ForegroundColor Cyan
-    Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
-    Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
-    Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction SilentlyContinue
-    Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
-    Set-MpPreference -DisablePrivacyMode $true -ErrorAction SilentlyContinue
-    Set-MpPreference -DisableIntrusionPreventionSystem $true -ErrorAction SilentlyContinue
-    Set-MpPreference -DisableScriptScanning $true -ErrorAction SilentlyContinue
-    Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction SilentlyContinue
-    Set-MpPreference -MAPSReporting 0 -ErrorAction SilentlyContinue
-
-    # 2. ביטול SmartScreen (קבצים, דפדפן ואפליקציות)
-    Write-Host "[*] Disabling SmartScreen..." -ForegroundColor Cyan
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -Value "Off" -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AppHost" -Name "EnableWebContentEvaluation" -Value 0 -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "EnableSmartScreen" -Value 0 -ErrorAction SilentlyContinue
-
-    # 3. ביטול Firewall (חומת האש)
-    Write-Host "[*] Disabling Windows Firewall (All Profiles)..." -ForegroundColor Cyan
-    Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False -ErrorAction SilentlyContinue
-
-    # 4. הרצת שינויי Registry כבדים (Policies)
-    Write-Host "[*] Applying Registry Security Kills..." -ForegroundColor Cyan
+    # 1. ביטול מוחלט של ה-Defender (Policies)
     $Paths = @(
         "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender",
-        "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
+        "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection",
+        "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet"
     )
-    foreach ($Path in $Paths) {
-        if (!(Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
-    }
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiSpyware" -Value 1 -ErrorAction SilentlyContinue
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" -Name "DisableRealtimeMonitoring" -Value 1 -ErrorAction SilentlyContinue
+    foreach ($Path in $Paths) { if (!(Test-Path $Path)) { New-Item $Path -Force | Out-Null } }
 
-    # 5. ניסיון לעצור את ה-Services (דורש הרשאות מנהל גבוהות)
-    Write-Host "[*] Killing Security Services..." -ForegroundColor Cyan
-    $Services = @("WinDefend", "WdNisSvc", "Sense", "wscsvc", "SgrmBroker", "SgrmLhc", "mpssvc")
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiSpyware" -Value 1
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiVirus" -Value 1
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" -Name "DisableRealtimeMonitoring" -Value 1
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" -Name "SubmitSamplesConsent" -Value 2
+
+    # 2. הסרת "Windows Security" מהגדרות הווינדוס (הגדרות האבטחה ייעלמו מהתפריט)
+    Write-Host "[+] Removing Security Health from Settings..." -ForegroundColor Cyan
+    $UIPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ControlPanel\NameSpace\{bb06c0e4-d293-4f75-8a90-cb05b6477eee}"
+    if (Test-Path $UIPath) { Remove-Item $UIPath -Recurse -Force -ErrorAction SilentlyContinue }
+    
+    # הסתרת סמל האבטחה מה-Systray (ליד השעון)
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "SecurityHealth" -Value "" -ErrorAction SilentlyContinue
+
+    # 3. ביטול SmartScreen ו-UAC (מניעת הודעות קופצות)
+    Write-Host "[+] Killing SmartScreen & UAC..." -ForegroundColor Cyan
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -Value "Off"
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableLUA" -Value 0
+
+    # 4. שיתוק שירותי המערכת (Services) דרך ה-Registry
+    # אנחנו משנים את ה-Start ל-4 (Disabled) ישירות ברגיסטרי כי הווינדוס חוסם פקודות SC רגילות
+    Write-Host "[+] Disabling Services via Registry (Deep)..." -ForegroundColor Cyan
+    $Services = @("WinDefend", "WdNisSvc", "Sense", "wscsvc", "mpssvc", "SecurityHealthService")
     foreach ($Svc in $Services) {
-        Stop-Service -Name $Svc -Force -ErrorAction SilentlyContinue
-        Set-Service -Name $Svc -StartupType Disabled -ErrorAction SilentlyContinue
-    }
-
-    Write-Host ""
-    Write-Host "DONE! All security systems have been targeted." -ForegroundColor Green
-    Write-Host "Press any key to return to menu..." -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-}
-
-    # 3. ביטול הגדרות Defender (Preferences)
-    if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
-        Set-MpPreference -DisableRealtimeMonitoring $true -DisableIOAVProtection $true -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
-    }
-
-    Write-Host "`n[!] SmokeyOS Branding & Security Overhaul Complete." -ForegroundColor White -BackgroundColor Magenta
-    Write-Host "[!] RESTART REQUIRED TO FULLY KILL PROTECTED SERVICES." -ForegroundColor Red
-    Pause
-}
-
-# --- פונקציית הטפט המעודכנת (עוקפת System32) ---
-function Set-OnlyWallpaper {
-    Clear-Host
-    Write-Host "=== APPLYING SMOKEY WALLPAPER ===" -ForegroundColor Magenta
-    
-    $imageName = "smokey_Tweaks.jpg"
-    $folderName = "Smokey Tweaks 1.0"
-    $userProfile = $env:USERPROFILE
-    
-    $paths = @(
-        "$userProfile\Desktop\$folderName\$imageName",
-        "$userProfile\OneDrive\Desktop\$folderName\$imageName",
-        "$userProfile\Downloads\$folderName\$imageName",
-        "$userProfile\Downloads\$imageName"
-    )
-
-    $foundPath = $null
-    foreach ($p in $paths) { if (Test-Path $p) { $foundPath = $p; break } }
-
-    if ($foundPath) {
-        Write-Host "[*] Image found at: $foundPath" -ForegroundColor Green
-        Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -Value $foundPath
-        
-        $code = @'
-        using System.Runtime.InteropServices;
-        public class Wallpaper {
-            [DllImport("user32.dll", CharSet = CharSet.Auto)]
-            public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+        $SvcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$Svc"
+        if (Test-Path $SvcPath) {
+            Set-ItemProperty -Path $SvcPath -Name "Start" -Value 4 -ErrorAction SilentlyContinue
         }
-'@
-        Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
-        [Wallpaper]::SystemParametersInfo(0x0014, 0, $foundPath, 0x01 -or 0x02) | Out-Null
-        Write-Host "[+] Wallpaper updated!" -ForegroundColor Cyan
-    } else {
-        Write-Host "[!] ERROR: Wallpaper not found!" -ForegroundColor Red
     }
-    Pause
+
+    # 5. ביטול Core Isolation (VBS) - ה-Tweak הכי חשוב ל-FPS
+    Write-Host "[+] Disabling Virtualization Based Security..." -ForegroundColor Yellow
+    Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -Value 0
+
+    Write-Host "`nSYSTEM PURGED SUCCESSFULLY." -ForegroundColor Green
+    Write-Host "RESTART REQUIRED to apply all changes." -ForegroundColor White
+    
+    # הודעת אזהרה סופית ב-GUI (אם תרצה)
+    # [System.Windows.Forms.MessageBox]::Show("Security is gone. Restart your PC now.")
 }
 
 function Disable-CoreIsolation {
