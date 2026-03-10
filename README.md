@@ -1,1 +1,1 @@
-# SmokeyTweaksGUI
+# SmokeyTweaks
